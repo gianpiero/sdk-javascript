@@ -7,12 +7,13 @@ const rti = require('rticonnextdds-connector')
 const configFile = path.join(__dirname, '/../CloudEvent.xml')
 console.log(configFile)
 
-
+const connector = new rti.Connector('CEParticipantLibrary::CEParticipantPubSub', configFile)
+const input  = connector.getInput("CESubscriber::CEReader");
+const output = connector.getOutput("CEPublisher::CEWriter");
 
 
 const receive = async () => {
-  const connector = new rti.Connector('CEParticipantLibrary::CEParticipantSub', configFile)
-  const input  = connector.getInput("CESubscriber::CEReader");
+
 
   try {
     console.log('Waiting for publications...')
@@ -40,8 +41,7 @@ const receive = async () => {
 }
 
 const emit = async () => {
-  const connector = new rti.Connector('CEParticipantLibrary::CEParticipantPub', configFile)
-  const output = connector.getOutput("CEPublisher::CEWriter");
+
   try {
     console.log('Waiting for subscriptions...')
     await output.waitForSubscriptions()
@@ -59,7 +59,8 @@ const emit = async () => {
   } catch (err) {
     console.log('Error encountered: ' + err)
   }
-  connector.close()
+  // The connector is shared with the receiver.
+  //connector.close()
 }
 
 // Run both functions concurrently using async/await and Promise.all()
