@@ -1,6 +1,5 @@
 /* eslint-disable */
-import { CloudEvent, MQTT } from "cloudevents";
-import * as mqtt from "mqtt";
+import { CloudEvent, DDS } from "cloudevents";
 const path = require('path')
 const sleep = require('sleep')
 const rti = require('rticonnextdds-connector')
@@ -27,7 +26,7 @@ const receive = async () => {
         // You can obtain all the fields as a JSON object
         const data = sample.getJson()
 
-        const event = MQTT.toEvent({
+        const event = DDS.toEvent({
           body: data,
           headers: {},
         });
