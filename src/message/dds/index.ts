@@ -3,34 +3,31 @@
  SPDX-License-Identifier: Apache-2.0
 */
 
+import { constants } from "buffer";
 import { Binding, Deserializer, CloudEvent, CloudEventV1, CONSTANTS, Message, ValidationError, Headers } from "../..";
-import { base64AsBinary } from "../../event/validation";
+import { base64AsBinary, isString, isStringOrThrow } from "../../event/validation";
 
 export {
   DDS, DDSMessageFactory
 };
 export type { DDSMessage };
 
+
+interface IDDSBody {
+  binary_data?: Buffer,
+  json_dds_data?: string,
+  text_data?: string,
+  packed_dds?: Buffer 
+}
+
 /**
  * Extends the base {@linkcode Message} interface to include DDS attributes, some of which
  * are aliases of the {Message} attributes.
  */
-interface DDSMessage<T> extends Message<T> {
-  /**
-   * Identifies this message as a PUBLISH packet. DDSMessages created with
-   * the `binary` and `structured` Serializers will contain a "Content Type"
-   * property in the PUBLISH record.
-   * @see https://github.com/cloudevents/spec/blob/v1.0.1/dds-protocol-binding.md#3-dds-publish-message-mapping
-   */
-  PUBLISH: Record<string, string | undefined> | undefined
-  /**
-   * Alias of {Message#body}
-   */
-  payload: T | undefined,
-  /**
-   * Alias of {Message#headers}
-   */
-  "User Properties": Headers | undefined
+interface DDSMessage<T = IDDSBody> extends Message<T> {
+  datacontenttype: string | undefined | unknown,
+  datacontentencoding: string | undefined | unknown,
+  [key: string]: unknown; // Allow additional properties
 }
 
 /**
@@ -38,7 +35,7 @@ interface DDSMessage<T> extends Message<T> {
  * @implements @linkcode Binding
  */
 const DDS: Binding = {
-  binary,
+  binary,  
   structured,
   toEvent: toEvent as Deserializer,
   isEvent
@@ -65,6 +62,7 @@ function binary<T>(event: CloudEventV1<T>): DDSMessage<T> {
   return DDSMessageFactory(event.datacontenttype as string, properties, body);
 }
 
+
 /**
  * Converts a CloudEvent into an DDSMessage<T> with the event as the message payload
  * @param {CloudEventV1} event a CloudEvent 
@@ -72,13 +70,68 @@ function binary<T>(event: CloudEventV1<T>): DDSMessage<T> {
  * @implements {Serializer}
  */
 function structured<T>(event: CloudEventV1<T>): DDSMessage<T> {
-  let body;
-  if (event instanceof CloudEvent) {
-    body = event.toJSON();
-  } else {
-    body = event;
+
+  // headers is a mandatory field of Message
+  const headers: Headers = { 
+    ...{ [CONSTANTS.HEADER_CONTENT_TYPE]: event.datacontenttype }, 
+  };
+
+  const properties = {...event}
+
+  // Conver the time in the DDS format
+  let time = {
+    sec: 0,
+    nanosec:0
   }
-  return DDSMessageFactory(CONSTANTS.DEFAULT_CE_CONTENT_TYPE, {}, body) as DDSMessage<T>;
+
+  if (typeof properties.time === 'string') {
+    const dateObj = new Date(properties.time);
+    const millisecondsSinceEpoch = dateObj.getTime();
+    time.sec = Math.floor(millisecondsSinceEpoch / 1000);
+    time.nanosec = (millisecondsSinceEpoch % 1000) * 1e6;
+  }
+  delete properties.time
+
+
+  let m_body = properties.data
+  delete properties.data
+
+  let m_datacontenttype = properties.datacontenttype;
+  delete properties.datacontenttype
+
+  let m_datacontentencoding = properties.datacontentencoding;
+  delete properties.datacontentencoding
+
+  if (m_datacontentencoding == 'json' || m_datacontentencoding === undefined) {
+    let json_dds_data_obj;
+    try {
+      json_dds_data_obj = JSON.stringify(m_body)
+    } catch (err) {
+      throw err;
+    }
+    return {
+      datacontentencoding: m_datacontentencoding,
+      datacontenttype: m_datacontenttype,
+      ...properties,
+      ...{time},
+      headers: headers,
+      body: {json_dds_data:  json_dds_data_obj}
+    }  
+  } else if (m_datacontentencoding == 'text') {
+    if (!isString(m_body)) {
+      throw ("Not a valid string")
+    }
+    return {
+      datacontentencoding: m_datacontentencoding,
+      datacontenttype: m_datacontenttype,
+      ...properties,
+      ...{time},
+      headers: headers,
+      body: {text_data: m_body }
+    }
+  } else {
+    throw new ValidationError("dataencoding");
+  }
 }
 
 /**
@@ -91,60 +144,81 @@ function structured<T>(event: CloudEventV1<T>): DDSMessage<T> {
  * @returns {DDSMessage<T>} a message initialized with the provided attributes
  */
 function DDSMessageFactory<T>(contentType: string, headers: Record<string, unknown>, body: T): DDSMessage<T> {
+
   return {
-    PUBLISH: {
-      "Content Type": contentType
-    },
+    datacontentencoding: undefined,
+    datacontenttype: undefined,
     body,
-    get payload() {
-      return this.body as T;
-    },
     headers: headers as Headers,
-    get "User Properties"() {
-      return this.headers as any;
-    }
   };
 }
 
 /**
  * Converts an DDSMessage<T> into a CloudEvent
- * @param {Message<T>} message the message to deserialize
+ * @param {DDSMessage<T>} message the message to deserialize
  * @param {boolean} strict determines if a ValidationError will be thrown on bad input - defaults to false
  * @returns {CloudEventV1<T>} an event
  * @implements {Deserializer}
  */
-function toEvent<T>(message: Message<T>, strict = false): CloudEventV1<T> | CloudEventV1<T>[] {
+function toEvent<T>(message: Message<T>, strict: boolean = false): CloudEventV1<T> | CloudEventV1<T>[] {
   if (strict && !isEvent(message)) {
     throw new ValidationError("No CloudEvent detected");
   }
-  if (isStructuredMessage(message as DDSMessage<T>)) {
-    const evt = (typeof message.body === "string") ? JSON.parse(message.body): message.body;
-    return new CloudEvent({
-      ...evt as CloudEventV1<T>
-    }, false);  
+  
+  let body;
+  if (isJsonDDSMessage(message as DDSMessage)) {
+    body = JSON.parse((message.body as any)['json_dds_data'])
+    delete message.body
+    
+  } else if (isTextDDSMessage(message as DDSMessage)) {
+    body = (message.body as any)['text_data']
+    delete message.body
   } else {
-    return new CloudEvent<T>({
-      ...message.headers,
-      data: message.body as T,
-    }, false);
+    //todo
+    
   }
+
+  // Convert time back
+  // Convert DDS time to JavaScript Date object
+  const time = (message as any)['time'];
+  let time_s = undefined;
+  if (time) {
+    const millisecondsSinceEpoch = time.sec * 1000 + Math.floor(time.nanosec / 1e6);
+    const dateObj = new Date(millisecondsSinceEpoch);
+    time_s = dateObj.toISOString();
+  }
+  
+
+  return new CloudEvent<T>({
+    ...message,
+    time: time_s,
+    data: body,
+  }, false);
 }
 
 /**
  * Determine if the message is a CloudEvent
- * @param {Message<T>} message an DDSMessage
+ * @param {DDSMessage<T>} message an DDSMessage
  * @returns {boolean} true if the message contains an event
  */
 function isEvent<T>(message: Message<T>): boolean {
-  return isBinaryMessage(message) || isStructuredMessage(message as DDSMessage<T>);
+  return isBinaryMessage(message as DDSMessage) || isStructuredMessage(message as DDSMessage);
 }
 
-function isBinaryMessage<T>(message: Message<T>): boolean {
-  return (!!message.headers.id && !!message.headers.source
-    && !! message.headers.type && !!message.headers.specversion);
+function isBinaryMessage<T>(message: DDSMessage<T>): boolean {
+  return !!message.body && typeof message.body === 'object' &&
+    ('binary_data' in message.body || 'packed_dds' in message.body);
 }
 
 function isStructuredMessage<T>(message: DDSMessage<T>): boolean {
-  if (!message) { return false; }
-  return (message.PUBLISH && message?.PUBLISH["Content Type"]?.startsWith(CONSTANTS.MIME_CE_JSON)) || false;
+  return !!message.body && typeof message.body === 'object' &&
+    ('json_dds_data' in message.body || 'text_data' in message.body);
+}
+
+function isJsonDDSMessage(message: DDSMessage): boolean {
+  return !!message.body && typeof message.body === 'object' && 'json_dds_data' in message.body;
+}
+
+function isTextDDSMessage(message: DDSMessage): boolean {
+  return !!message.body && typeof message.body === 'object' && 'text_data' in message.body;
 }
