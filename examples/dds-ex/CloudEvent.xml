@@ -105,12 +105,24 @@
           </struct>
         </module>
       </module>
+      <struct name="ShapeType">
+        <member name="color" type="string" stringMaxLength="255" key="true"/>
+        <member name="x" type="float32"/>
+        <member name="y" type="float32"/>
+        <member name="shapesize" type="int32"/>
+      </struct>
     </types>
 
     <domain_library name="CEDomainLibrary">
       <domain name="CEDomain" domain_id="0">
         <register_type name="CloudEvent" type_ref="io::cloudevents::Event"/>
         <topic name="Presence" register_type_ref="CloudEvent"/>
+      </domain>
+    </domain_library>
+    <domain_library name="UtilDomainLibrary">
+      <domain name="UtilDomain" domain_id="1">
+        <register_type name="ShapeType" type_ref="ShapeType"/>
+        <topic name="Square" register_type_ref="ShapeType"/>
       </domain>
     </domain_library>
 
@@ -131,6 +143,16 @@
         </publisher>
         <subscriber name="CESubscriber">
           <data_reader name="CEReader" topic_ref="Presence"/>
+        </subscriber>
+      </domain_participant>
+    </domain_participant_library>
+    <domain_participant_library name="UtilParticipantLibrary">
+      <domain_participant name="UtilParticipantPubSub" domain_ref="UtilDomainLibrary::UtilDomain">
+        <publisher name="UtilPublisher">
+          <data_writer name="SquareWriter" topic_ref="Square"/>
+        </publisher>
+        <subscriber name="UtilSubscriber">
+          <data_reader name="SquareReader" topic_ref="Square"/>
         </subscriber>
       </domain_participant>
     </domain_participant_library>

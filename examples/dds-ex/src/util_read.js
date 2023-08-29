@@ -22,7 +22,17 @@ const run = async () => {
         // You can obtain all the fields as a JSON object
         const data = sample.getJson()
         console.log(JSON.stringify(data))
+
+        const cdrBuff = sample.cdr
+        console.log(cdrBuff)
+        
       }
+
+      // for (let i=0; i < input.samples.length; i++) {
+      //   const pointer = input.samples.getNative(i)
+      //   const b_size = -1
+      //   const res = RTI_Connector_DDS_DynamicData_to_cdr_buffer(pointer,NULL,b_size)
+      // }
     }
   } catch (err) {
     console.log('Error encountered: ' + err)

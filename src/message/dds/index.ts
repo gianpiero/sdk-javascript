@@ -202,7 +202,8 @@ function structured<T>(event: CloudEventV1<T>): DDSMessage<T> {
  * @returns {CloudEventV1<T>} an event
  * @implements {Deserializer}
  */
-function toEvent<T>(message: Message<T>, strict: boolean = false): CloudEventV1<T> | CloudEventV1<T>[] {
+function toEvent<T>(message_i: Message<T>, strict: boolean = false): CloudEventV1<T> | CloudEventV1<T>[] {
+  const message = {...message_i}
   if (strict && !isEvent(message)) {
     throw new ValidationError("No CloudEvent detected");
   }
@@ -215,11 +216,14 @@ function toEvent<T>(message: Message<T>, strict: boolean = false): CloudEventV1<
   } else if (isTextDDSMessage(message as DDSMessage)) {
     body = (message.body as any)['text_data']
     delete message.body
-  } else if (isBinaryMessage(message as DDSMessage)) {
+  } else if (isPlainBinaryDDSMessage(message as DDSMessage)) {
     body = Buffer.from((message.body as any)['binary_data'])
     delete message.body
+  } else if (isCDRBinaryDDSMessage(message as DDSMessage)) {
+    body = Buffer.from((message.body as any)['packed_dds_data'])
+    delete message.body
   } else {
-    //todo
+    throw new ValidationError("No a valid message");
     
   }
 
@@ -252,7 +256,7 @@ function isEvent<T>(message: Message<T>): boolean {
 
 function isBinaryMessage<T>(message: DDSMessage<T>): boolean {
   return !!message.body && typeof message.body === 'object' &&
-    ('binary_data' in message.body || 'packed_dds' in message.body);
+    ('binary_data' in message.body || 'packed_dds_data' in message.body);
 }
 
 function isStructuredMessage<T>(message: DDSMessage<T>): boolean {
@@ -266,4 +270,12 @@ function isJsonDDSMessage(message: DDSMessage): boolean {
 
 function isTextDDSMessage(message: DDSMessage): boolean {
   return !!message.body && typeof message.body === 'object' && 'text_data' in message.body;
+}
+
+function isPlainBinaryDDSMessage(message: DDSMessage): boolean {
+  return !!message.body && typeof message.body === 'object' && 'binary_data' in message.body;
+}
+
+function isCDRBinaryDDSMessage(message: DDSMessage): boolean {
+  return !!message.body && typeof message.body === 'object' && 'packed_dds_data' in message.body;
 }
