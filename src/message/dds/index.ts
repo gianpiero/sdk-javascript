@@ -8,7 +8,7 @@ import { Binding, Deserializer, CloudEvent, CloudEventV1, CONSTANTS, Message, Va
 import { base64AsBinary, isString, isStringOrThrow } from "../../event/validation";
 
 export {
-  DDS, DDSMessageFactory
+  DDS
 };
 export type { DDSMessage };
 
@@ -48,18 +48,77 @@ const DDS: Binding = {
  * @implements {Serializer}
  */
 function binary<T>(event: CloudEventV1<T>): DDSMessage<T> {
-  const properties = { ...event };
+  const properties = {...event}
 
-  let body = properties.data as T;
+  // headers is a mandatory field of Message
+  const headers: Headers = { 
+    ...{ [CONSTANTS.HEADER_CONTENT_TYPE]: event.datacontenttype }, 
+  };
 
-  if (!body && properties.data_base64) {
-    body = base64AsBinary(properties.data_base64) as unknown as T;
+  // Conver the time in the DDS format
+  let time = {
+    sec: 0,
+    nanosec:0
   }
 
-  delete properties.data;
-  delete properties.data_base64;
+  if (typeof properties.time === 'string') {
+    const dateObj = new Date(properties.time);
+    const millisecondsSinceEpoch = dateObj.getTime();
+    time.sec = Math.floor(millisecondsSinceEpoch / 1000);
+    time.nanosec = (millisecondsSinceEpoch % 1000) * 1e6;
+  }
+  delete properties.time
 
-  return DDSMessageFactory(event.datacontenttype as string, properties, body);
+  let m_body: number[];
+  if (properties.data instanceof Buffer) {
+    m_body = Array.from((properties.data as Buffer) || []);  
+  } else { //TODO: What if it's CDR?
+    m_body = [] // TODOL throw?
+  }
+  delete properties.data
+  
+
+  let m_datacontenttype = properties.datacontenttype;
+  delete properties.datacontenttype
+
+  let m_datacontentencoding = properties.datacontentencoding;
+  delete properties.datacontentencoding
+
+  delete properties.data_base64
+
+  if (m_datacontentencoding == 'binary' || m_datacontentencoding === undefined) {
+    let binary_data_obj;
+    try {
+      binary_data_obj = m_body
+    } catch (err) {
+      throw err;
+    }
+    return {
+      datacontentencoding: m_datacontentencoding,
+      datacontenttype: m_datacontenttype,
+      ...properties,
+      ...{time},
+      headers: headers,
+      body: {binary_data:  binary_data_obj}
+    }  
+  } else if (m_datacontentencoding == 'cdr') {
+    let cdr_data_obj;
+    try {
+      cdr_data_obj = m_body
+    } catch (err) {
+      throw err;
+    }
+    return {
+      datacontentencoding: m_datacontentencoding,
+      datacontenttype: m_datacontenttype,
+      ...properties,
+      ...{time},
+      headers: headers,
+      body: {packed_dds_data: m_body }
+    }
+  } else {
+    throw new ValidationError("dataencoding");
+  }
 }
 
 
@@ -134,24 +193,7 @@ function structured<T>(event: CloudEventV1<T>): DDSMessage<T> {
   }
 }
 
-/**
- * A helper function to create an DDSMessage<T> object, with "User Properties" as an alias
- * for "headers" and "payload" an alias for body, and a "PUBLISH" record with a "Content Type"
- * property.
- * @param {string} contentType the "Content Type" attribute on PUBLISH
- * @param {Record<string, unknown>} headers the headers and "User Properties"
- * @param {T} body the message body/payload
- * @returns {DDSMessage<T>} a message initialized with the provided attributes
- */
-function DDSMessageFactory<T>(contentType: string, headers: Record<string, unknown>, body: T): DDSMessage<T> {
 
-  return {
-    datacontentencoding: undefined,
-    datacontenttype: undefined,
-    body,
-    headers: headers as Headers,
-  };
-}
 
 /**
  * Converts an DDSMessage<T> into a CloudEvent
@@ -172,6 +214,9 @@ function toEvent<T>(message: Message<T>, strict: boolean = false): CloudEventV1<
     
   } else if (isTextDDSMessage(message as DDSMessage)) {
     body = (message.body as any)['text_data']
+    delete message.body
+  } else if (isBinaryMessage(message as DDSMessage)) {
+    body = Buffer.from((message.body as any)['binary_data'])
     delete message.body
   } else {
     //todo

@@ -112,12 +112,28 @@ const emit = async () => {
     subject: "SQUARE",
     time,
     dataschema,
+    datakey:"t",
     datacontentencoding: "text",
     data: "just normal text",
     // [ext1Name]: ext1Value,
     // [ext2Name]: ext2Value,
   })
-  
+
+  const ce_dds_binary_obj = new CloudEvent({
+    specversion: "1.0",
+    id: "b46cf653-d48a-4b90-8dfa-355c01061364",
+    type,
+    source,
+    datacontenttype: "application/cloudevent+dds",
+    subject: "SQUARE",
+    time,
+    dataschema,
+    datakey:"b",
+    datacontentencoding: "binary",
+    data: Buffer.from("just normal text" as string)
+    // [ext1Name]: ext1Value,
+    // [ext2Name]: ext2Value,
+  })
   
   try {
     console.log('Waiting for subscriptions...')
@@ -148,6 +164,13 @@ const emit = async () => {
     output.clearMembers()
     sleep.msleep(500)
     
+    console.log('Writing... msg_dds_binary_obj')
+    const msg_dds_binary_obj = DDS.binary(ce_dds_binary_obj);
+    console.log(msg_dds_binary_obj)
+    output.instance.setFromJson(msg_dds_binary_obj)
+    output.write()
+    output.clearMembers()
+    sleep.msleep(500)
     
     console.log('Writer waiting for subs to receive!')
     // Wait for all subscriptions to receive the data before exiting

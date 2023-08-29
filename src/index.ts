@@ -11,7 +11,7 @@ import { Options, TransportFunction, EmitterFunction, emitterFor, Emitter } from
 import { httpTransport } from "./transport/http";
 import {
   Headers, Mode, Binding, HTTP, Kafka, KafkaEvent, KafkaMessage, Message, MQTT, MQTTMessage, MQTTMessageFactory,
-  DDS, DDSMessage, DDSMessageFactory, Serializer, Deserializer } from "./message";
+  DDS, DDSMessage, Serializer, Deserializer } from "./message";
 
 import CONSTANTS from "./constants";
 
@@ -27,7 +27,6 @@ export {
   MQTT,
   MQTTMessageFactory,
   DDS,
-  DDSMessageFactory,
   emitterFor,
   httpTransport,
   Emitter,
